@@ -1,0 +1,37 @@
+name: "ATV3 Evdev Bridge"
+version: "1.0.8"
+slug: "atv3_evdev_bridge"
+description: "Reads Remoter ATV3 Bluetooth evdev input and emits HA events with full button mapping."
+arch:
+  - aarch64
+
+startup: services
+boot: auto
+init: false
+
+# We are calling the HA REST API proxy at http://supervisor/core/api/...
+homeassistant_api: true
+# Safe to enable; also ensures Supervisor token is available on most setups
+hassio_api: true
+
+# You already proved you need elevated access to /dev/input
+apparmor: false
+full_access: true
+
+options:
+  target_contains: "Remoter ATV3"
+  event_type: "atv3_evdev_bridge_command_received"
+  grab_device: true
+  ignore_scancodes: "700aa"
+  hold_delay: 0.25
+  hold_repeat: 0.10
+  log_level: "INFO"
+
+schema:
+  target_contains: str
+  event_type: str
+  grab_device: bool
+  ignore_scancodes: str
+  hold_delay: float
+  hold_repeat: float
+  log_level: str
