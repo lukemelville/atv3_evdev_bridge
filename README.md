@@ -1,4 +1,4 @@
-# ATV3 Evdev Bridge
+# ATV3 Evdev Bridge Addon for Home Assistant
 
 Home Assistant add-on that reads Bluetooth evdev input from the "Remoter ATV3" remote
 and emits Home Assistant events with normalized button names. It is designed for
