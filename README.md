@@ -17,7 +17,7 @@ Built with Codex using GPT-5.2 🤖
 
 - Home Assistant OS with Supervisor (for add-ons and Supervisor API).
 - Bluetooth controller that works with Linux (see the [known working adapters list](https://www.home-assistant.io/integrations/bluetooth#known-working-high-performance-adapters))
-- A Bluetooth remote that exposes evdev input (tested with Remoter ATV3).
+- A Bluetooth remote that exposes evdev input (tested with [Remoter ATV3](https://www.aliexpress.com/item/1005007402456879.html?spm=a2g0o.order_list.order_list_main.42.21ef1802138yNy).
 - Access to `/dev/input` on the host (requires disabling Protection mode).
 
 ## What it does
