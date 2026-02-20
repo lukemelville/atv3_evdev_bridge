@@ -1,5 +1,5 @@
 name: "ATV3 Evdev Bridge"
-version: "2.3"
+version: "2.4"
 slug: "atv3_evdev_bridge"
 description: "Reads Remoter ATV3 Bluetooth evdev input and emits HA events with full button mapping."
 arch:
@@ -14,12 +14,10 @@ homeassistant_api: true
 # Safe to enable; also ensures Supervisor token is available on most setups
 hassio_api: true
 
-# Keep protection mode enabled, but disable AppArmor for direct evdev reads.
-# /dev/input access is still constrained via `devices`.
+# This add-on reads raw evdev nodes. On current HAOS/Supervisor, Protection mode
+# blocks /dev/input event access (EPERM), so run unprotected for this add-on.
 apparmor: false
-full_access: false
-devices:
-  - /dev/input
+full_access: true
 
 options:
   target_contains: "Remoter ATV3"

@@ -178,6 +178,29 @@ def parse_positive_int(name: str, raw: object, default: int, cfg_level: str) -> 
     return value
 
 
+def get_addon_protected_mode(session: requests.Session, token: str) -> Optional[bool]:
+    url = "http://supervisor/addons/self/info"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    response = None
+    try:
+        response = session.get(url, headers=headers, timeout=5)
+        if not response.ok:
+            return None
+        data = response.json().get("data", {})
+        protected = data.get("protected")
+        if isinstance(protected, bool):
+            return protected
+    except Exception:
+        return None
+    finally:
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
+    return None
+
+
 def normalize_button_name(raw: object, option_name: str, cfg_level: str) -> Optional[str]:
     button = re.sub(r"\s+", "_", str(raw or "").strip().lower())
     if not button:
@@ -582,6 +605,7 @@ async def main() -> None:
         post_timeout=event_post_timeout,
     )
     await dispatcher.start()
+    protected_mode = get_addon_protected_mode(session, token)
     key_map = dict(KEY_MAP)
     key_map.update(key_map_overrides)
     scan_map = dict(SCAN_MAP)
@@ -597,6 +621,15 @@ async def main() -> None:
     log("INFO", f"Hold: delay={hold_delay}s repeat={hold_repeat}s", cfg_level)
     log("INFO", f"Event queue size: {event_queue_size}", cfg_level)
     log("INFO", f"Event post timeout: {event_post_timeout}s", cfg_level)
+    if protected_mode is True:
+        log(
+            "WARN",
+            "Add-on Protection mode is enabled. /dev/input event access is blocked in this environment; "
+            "disable Protection mode for this add-on.",
+            cfg_level,
+        )
+    elif protected_mode is False:
+        log("INFO", "Add-on Protection mode is disabled.", cfg_level)
     open_error_last_log: Dict[str, float] = {}
 
     try:
@@ -639,13 +672,21 @@ async def main() -> None:
                     last = open_error_last_log.get(hint_key, 0.0)
                     if now - last >= 30.0:
                         open_error_last_log[hint_key] = now
-                        log(
-                            "WARN",
-                            f"Permission denied for input devices ({hint}). "
-                            "If AppArmor is enabled, disable it or use a custom AppArmor profile.",
-                            cfg_level,
-                        )
-                await asyncio.sleep(2)
+                        if protected_mode is True:
+                            log(
+                                "WARN",
+                                f"Permission denied for input devices ({hint}). "
+                                "Protection mode is enabled; disable Protection mode for this add-on.",
+                                cfg_level,
+                            )
+                        else:
+                            log(
+                                "WARN",
+                                f"Permission denied for input devices ({hint}). "
+                                "Verify add-on permissions and host device access.",
+                                cfg_level,
+                            )
+                await asyncio.sleep(10 if protected_mode is True else 2)
                 continue
 
             tasks = [

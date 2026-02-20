@@ -122,10 +122,12 @@ Known app scan codes from this remote:
 
 ## Security notes
 
-This add-on needs raw access to `/dev/input`. It is configured for least-privilege
-device access (`devices: [/dev/input]`) while keeping `full_access: false`.
-AppArmor is disabled for this add-on because default AppArmor policies can block
-opening evdev event nodes.
+This add-on needs raw access to `/dev/input` event nodes. On Home Assistant OS +
+Supervisor (tested on HAOS 17.1 / Core 2026.2.2), those devices are blocked when
+the add-on is in Protection mode. For this add-on, you should:
+
+- Disable Protection mode in the add-on UI.
+- Keep `apparmor: false` and `full_access: true` in `config.yaml`.
 
 ## Bluetooth setup (optional)
 
@@ -155,7 +157,7 @@ cat /proc/bus/input/devices | grep -i -n "remoter\\|atv3"
 - If no device is found, increase `log_level` to `DEBUG` and confirm the
   remote shows up in `/proc/bus/input/devices`.
 - If buttons are missing, capture scan codes and add them to `scan_map_overrides` (or `SCAN_MAP` in code).
-- If you see `PermissionError` for `/dev/input/event*`, verify `/dev/input` is present under `devices` in `config.yaml`.
+- If you see `PermissionError` / `Operation not permitted` for `/dev/input/event*`, disable Protection mode for this add-on and restart it.
 - If you see `Resource busy`, another integration is grabbing the device.
 
 ## License
