@@ -128,6 +128,8 @@ the add-on is in Protection mode. For this add-on, you should:
 
 - Disable Protection mode in the add-on UI.
 - Keep `apparmor: false` and `full_access: true` in `config.yaml`.
+- If the Protection toggle is missing in the UI, check `ha apps info local_atv3_evdev_bridge`:
+  if `full_access` is `false`, Supervisor will hide that toggle.
 
 ## Bluetooth setup (optional)
 

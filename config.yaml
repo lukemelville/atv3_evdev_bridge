@@ -1,5 +1,5 @@
 name: "ATV3 Evdev Bridge"
-version: "2.4"
+version: "2.5"
 slug: "atv3_evdev_bridge"
 description: "Reads Remoter ATV3 Bluetooth evdev input and emits HA events with full button mapping."
 arch:
@@ -8,6 +8,7 @@ arch:
 startup: services
 boot: auto
 init: false
+advanced: true
 
 # We are calling the HA REST API proxy at http://supervisor/core/api/...
 homeassistant_api: true
