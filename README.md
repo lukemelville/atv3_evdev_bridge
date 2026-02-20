@@ -18,7 +18,7 @@ Built with Codex using GPT-5.2 🤖
 - Home Assistant OS with Supervisor (for add-ons and Supervisor API).
 - Bluetooth controller that works with Linux (see the [known working adapters list](https://www.home-assistant.io/integrations/bluetooth#known-working-high-performance-adapters))
 - A Bluetooth remote that exposes evdev input (tested with Remoter ATV3).
-- Access to `/dev/input` on the host (requires disabling Protection mode).
+- Access to `/dev/input` on the host.
 
 ## What it does
 
@@ -122,10 +122,10 @@ Known app scan codes from this remote:
 
 ## Security notes
 
-This add-on needs raw access to `/dev/input`, so it sets `full_access: true` and
-`apparmor: false` in `config.yaml`. You also need to disable Protection mode
-for the add-on in the UI. Only install if you trust the code and the host
-environment.
+This add-on needs raw access to `/dev/input`. It is configured for least-privilege
+device access (`devices: [/dev/input]`) while keeping `full_access: false`.
+AppArmor is disabled for this add-on because default AppArmor policies can block
+opening evdev event nodes.
 
 ## Bluetooth setup (optional)
 
@@ -155,7 +155,7 @@ cat /proc/bus/input/devices | grep -i -n "remoter\\|atv3"
 - If no device is found, increase `log_level` to `DEBUG` and confirm the
   remote shows up in `/proc/bus/input/devices`.
 - If buttons are missing, capture scan codes and add them to `scan_map_overrides` (or `SCAN_MAP` in code).
-- If you see `PermissionError` for `/dev/input/event*`, disable Protection mode.
+- If you see `PermissionError` for `/dev/input/event*`, verify `/dev/input` is present under `devices` in `config.yaml`.
 - If you see `Resource busy`, another integration is grabbing the device.
 
 ## License

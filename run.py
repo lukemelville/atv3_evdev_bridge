@@ -597,6 +597,7 @@ async def main() -> None:
     log("INFO", f"Hold: delay={hold_delay}s repeat={hold_repeat}s", cfg_level)
     log("INFO", f"Event queue size: {event_queue_size}", cfg_level)
     log("INFO", f"Event post timeout: {event_post_timeout}s", cfg_level)
+    open_error_last_log: Dict[str, float] = {}
 
     try:
         while True:
@@ -607,6 +608,7 @@ async def main() -> None:
                 continue
 
             devs: List[InputDevice] = []
+            permission_denied_paths: List[str] = []
             for p in paths:
                 try:
                     d = InputDevice(p)
@@ -619,9 +621,30 @@ async def main() -> None:
                         except OSError as e:
                             log("WARN", f"Could not grab {p}: {e} (will still try to read)", cfg_level)
                 except Exception as e:
-                    log("WARN", f"Failed to open {p}: {e}", cfg_level)
+                    now = time.time()
+                    err = str(e)
+                    msg_key = f"{p}|{err}"
+                    last = open_error_last_log.get(msg_key, 0.0)
+                    if now - last >= 30.0:
+                        open_error_last_log[msg_key] = now
+                        log("WARN", f"Failed to open {p}: {e}", cfg_level)
+                    if isinstance(e, PermissionError) or "Operation not permitted" in err:
+                        permission_denied_paths.append(p)
 
             if not devs:
+                if permission_denied_paths:
+                    hint = ",".join(sorted(set(permission_denied_paths)))
+                    hint_key = f"perm_hint|{hint}"
+                    now = time.time()
+                    last = open_error_last_log.get(hint_key, 0.0)
+                    if now - last >= 30.0:
+                        open_error_last_log[hint_key] = now
+                        log(
+                            "WARN",
+                            f"Permission denied for input devices ({hint}). "
+                            "If AppArmor is enabled, disable it or use a custom AppArmor profile.",
+                            cfg_level,
+                        )
                 await asyncio.sleep(2)
                 continue
 
