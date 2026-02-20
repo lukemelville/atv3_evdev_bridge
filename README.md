@@ -26,6 +26,7 @@ Built with Codex using GPT-5.2 🤖
 - Listens to evdev key + MSC scan codes and normalizes them into a consistent set
   of button names, including app buttons.
 - Emits a Home Assistant event for key down/up and synthetic key hold repeats.
+- Uses a bounded async event queue so slow API responses do not block evdev reads.
 
 ## Tested hardware / environment
 
@@ -57,6 +58,8 @@ All options live in the add-on config UI.
 - `ignore_scancodes` (string): Comma-separated scan codes to ignore.
 - `hold_delay` (float): Seconds to wait before emitting `key_hold` repeats.
 - `hold_repeat` (float): Seconds between `key_hold` repeats.
+- `event_queue_size` (int): Max queued events before new events are dropped.
+- `event_post_timeout` (float): Timeout in seconds for posting each event.
 - `log_level` (string): `DEBUG`, `INFO`, `WARN`, or `ERROR`.
 
 ### Device grabbing (exclusive access)
