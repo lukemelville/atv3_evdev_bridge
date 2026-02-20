@@ -56,6 +56,9 @@ All options live in the add-on config UI.
 - `event_type` (string): Event name to fire in Home Assistant.
 - `grab_device` (bool): If true, grabs exclusive access to the evdev device.
 - `ignore_scancodes` (string): Comma-separated scan codes to ignore.
+- `hold_buttons` (string): Comma-separated buttons that should emit `key_hold`.
+- `key_map_overrides` (string): Button overrides for Linux key codes.
+- `scan_map_overrides` (string): Button overrides for scan codes.
 - `hold_delay` (float): Seconds to wait before emitting `key_hold` repeats.
 - `hold_repeat` (float): Seconds between `key_hold` repeats.
 - `event_queue_size` (int): Max queued events before new events are dropped.
@@ -96,6 +99,18 @@ The add-on fires events to `event_type` with a payload like:
 Mappings come from both Linux keycodes and scan codes. Known mappings live in
 `run.py` under `KEY_MAP` and `SCAN_MAP`. Unknown keys fall back to `KEY_*` names
 (lowercased) to avoid losing buttons.
+
+You can override mappings from the add-on config without editing code.
+
+- `key_map_overrides` supports either JSON object or comma-separated pairs:
+  - JSON: `{"353":"ok","172":"home"}`
+  - CSV: `353=ok,172=home`
+- `scan_map_overrides` supports either JSON object or comma-separated pairs:
+  - JSON: `{"c0009":"youtube","c000a":"gear"}`
+  - CSV: `c0009=youtube,c000a=gear`
+
+`hold_buttons` controls which normalized buttons emit repeated `key_hold` events.
+Example: `up,down,left,right,vol_up,vol_down`
 
 Known app scan codes from this remote:
 
@@ -139,7 +154,7 @@ cat /proc/bus/input/devices | grep -i -n "remoter\\|atv3"
 
 - If no device is found, increase `log_level` to `DEBUG` and confirm the
   remote shows up in `/proc/bus/input/devices`.
-- If buttons are missing, capture scan codes and add them to `SCAN_MAP`.
+- If buttons are missing, capture scan codes and add them to `scan_map_overrides` (or `SCAN_MAP` in code).
 - If you see `PermissionError` for `/dev/input/event*`, disable Protection mode.
 - If you see `Resource busy`, another integration is grabbing the device.
 

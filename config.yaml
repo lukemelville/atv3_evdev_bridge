@@ -1,5 +1,5 @@
 name: "ATV3 Evdev Bridge"
-version: "2.0"
+version: "2.1"
 slug: "atv3_evdev_bridge"
 description: "Reads Remoter ATV3 Bluetooth evdev input and emits HA events with full button mapping."
 arch:
@@ -23,6 +23,9 @@ options:
   event_type: "atv3_evdev_bridge_command_received"
   grab_device: true
   ignore_scancodes: "700aa"
+  hold_buttons: "up,down,left,right,vol_up,vol_down,ch_up,ch_down"
+  key_map_overrides: ""
+  scan_map_overrides: ""
   hold_delay: 0.25
   hold_repeat: 0.10
   event_queue_size: 256
@@ -34,6 +37,9 @@ schema:
   event_type: str
   grab_device: bool
   ignore_scancodes: str
+  hold_buttons: str
+  key_map_overrides: str
+  scan_map_overrides: str
   hold_delay: float
   hold_repeat: float
   event_queue_size: int

@@ -4,7 +4,7 @@ import json
 import os
 import re
 import time
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import requests
 from evdev import InputDevice, ecodes
@@ -18,7 +18,12 @@ DEFAULT_HOLD_REPEAT = 0.10
 DEFAULT_EVENT_QUEUE_SIZE = 256
 DEFAULT_EVENT_POST_TIMEOUT = 3.0
 EVENT_TYPE_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]*$")
-HOLD_BUTTONS = {"up", "down", "left", "right", "vol_up", "vol_down", "ch_up", "ch_down"}
+BUTTON_RE = re.compile(r"^[a-z0-9_]+$")
+SCAN_CODE_RE = re.compile(r"^[0-9a-f]+$")
+DEFAULT_HOLD_BUTTONS = ["up", "down", "left", "right", "vol_up", "vol_down", "ch_up", "ch_down"]
+DEFAULT_HOLD_BUTTONS_CSV = ",".join(DEFAULT_HOLD_BUTTONS)
+DEFAULT_KEY_MAP_OVERRIDES = ""
+DEFAULT_SCAN_MAP_OVERRIDES = ""
 
 
 # === Your original mapping (plus a few adds you’re seeing now) ===
@@ -173,9 +178,127 @@ def parse_positive_int(name: str, raw: object, default: int, cfg_level: str) -> 
     return value
 
 
-def resolve_button(code: int, name: str, scan: str, ignore: Set[str]) -> str:
+def normalize_button_name(raw: object, option_name: str, cfg_level: str) -> Optional[str]:
+    button = re.sub(r"\s+", "_", str(raw or "").strip().lower())
+    if not button:
+        log("WARN", f"Ignoring empty button value in {option_name}", cfg_level)
+        return None
+    if not BUTTON_RE.fullmatch(button):
+        log("WARN", f"Ignoring invalid button value '{raw}' in {option_name}", cfg_level)
+        return None
+    return button
+
+
+def parse_button_mapping_input(raw: object, option_name: str, cfg_level: str) -> Dict[str, str]:
+    if raw is None:
+        return {}
+
+    if isinstance(raw, dict):
+        return {str(k): str(v) for k, v in raw.items()}
+
+    text = str(raw).strip()
+    if not text:
+        return {}
+
+    loaded: Any = None
+    if text.startswith("{"):
+        try:
+            loaded = json.loads(text)
+        except Exception as e:
+            log("WARN", f"{option_name} JSON parse failed ({e}); falling back to CSV parser", cfg_level)
+
+        if isinstance(loaded, dict):
+            return {str(k): str(v) for k, v in loaded.items()}
+        if loaded is not None:
+            log("WARN", f"{option_name} JSON must be an object; ignoring parsed value", cfg_level)
+            return {}
+
+    out: Dict[str, str] = {}
+    for part in [p.strip() for p in text.split(",") if p.strip()]:
+        if "=" in part:
+            k, v = part.split("=", 1)
+        elif ":" in part:
+            k, v = part.split(":", 1)
+        else:
+            log("WARN", f"Ignoring invalid mapping '{part}' in {option_name}", cfg_level)
+            continue
+
+        key = k.strip()
+        value = v.strip()
+        if not key or not value:
+            log("WARN", f"Ignoring invalid mapping '{part}' in {option_name}", cfg_level)
+            continue
+        out[key] = value
+
+    return out
+
+
+def parse_key_map_overrides(raw: object, cfg_level: str) -> Dict[int, str]:
+    parsed = parse_button_mapping_input(raw, "key_map_overrides", cfg_level)
+    out: Dict[int, str] = {}
+    for raw_key, raw_button in parsed.items():
+        try:
+            key = int(str(raw_key).strip(), 0)
+        except Exception:
+            log("WARN", f"Ignoring invalid keycode '{raw_key}' in key_map_overrides", cfg_level)
+            continue
+
+        button = normalize_button_name(raw_button, "key_map_overrides", cfg_level)
+        if not button:
+            continue
+        out[key] = button
+    return out
+
+
+def parse_scan_map_overrides(raw: object, cfg_level: str) -> Dict[str, str]:
+    parsed = parse_button_mapping_input(raw, "scan_map_overrides", cfg_level)
+    out: Dict[str, str] = {}
+    for raw_key, raw_button in parsed.items():
+        key = str(raw_key).strip().lower().removeprefix("0x")
+        if not key or not SCAN_CODE_RE.fullmatch(key):
+            log("WARN", f"Ignoring invalid scan code '{raw_key}' in scan_map_overrides", cfg_level)
+            continue
+
+        button = normalize_button_name(raw_button, "scan_map_overrides", cfg_level)
+        if not button:
+            continue
+        out[key] = button
+    return out
+
+
+def parse_hold_buttons(raw: object, cfg_level: str) -> Set[str]:
+    candidates: List[str]
+    if isinstance(raw, list):
+        candidates = [str(v) for v in raw]
+    else:
+        text = str(raw or "").strip()
+        if not text:
+            text = DEFAULT_HOLD_BUTTONS_CSV
+        candidates = [p.strip() for p in text.split(",") if p.strip()]
+
+    out: Set[str] = set()
+    for c in candidates:
+        button = normalize_button_name(c, "hold_buttons", cfg_level)
+        if button:
+            out.add(button)
+
+    if out:
+        return out
+
+    log("WARN", f"hold_buttons resolved to empty; using defaults ({DEFAULT_HOLD_BUTTONS_CSV})", cfg_level)
+    return set(DEFAULT_HOLD_BUTTONS)
+
+
+def resolve_button(
+    code: int,
+    name: str,
+    scan: str,
+    ignore: Set[str],
+    key_map: Dict[int, str],
+    scan_map: Dict[str, str],
+) -> str:
     # 1) keycode mapping always wins (this restores your dpad/home/back/etc)
-    btn = KEY_MAP.get(code)
+    btn = key_map.get(code)
     if btn:
         return btn
 
@@ -183,7 +306,7 @@ def resolve_button(code: int, name: str, scan: str, ignore: Set[str]) -> str:
     if scan:
         if scan in ignore:
             return ""  # caller will skip
-        btn2 = SCAN_MAP.get(scan)
+        btn2 = scan_map.get(scan)
         if btn2:
             return btn2
         if code == 240:
@@ -341,7 +464,10 @@ async def hold_loop(
 async def read_device(
     dev: InputDevice,
     dispatcher: EventDispatcher,
+    key_map: Dict[int, str],
+    scan_map: Dict[str, str],
     ignore_scans: Set[str],
+    hold_buttons: Set[str],
     hold_delay: float,
     hold_repeat: float,
     cfg_level: str,
@@ -369,7 +495,7 @@ async def read_device(
             last_scan = None  # single-use, avoids “sticky scan” weirdness
 
             name = key_name(code)
-            button = resolve_button(code, name, scan, ignore_scans)
+            button = resolve_button(code, name, scan, ignore_scans, key_map, scan_map)
             if not button:
                 continue
 
@@ -388,7 +514,7 @@ async def read_device(
                 log("INFO", f"KEY_DOWN dev={dev.path} code={code} name={name} scan={scan} button={button}", cfg_level)
 
                 # start hold for these
-                if button in HOLD_BUTTONS:
+                if button in hold_buttons:
                     key = (code, button)
                     # cancel existing
                     old = holds.pop(key, None)
@@ -427,6 +553,9 @@ async def main() -> None:
     event_type = parse_event_type(opts.get("event_type", DEFAULT_EVENT_TYPE), cfg_level)
     grab_device = bool(opts.get("grab_device", True))
     ignore_scans = parse_ignore_scans(str(opts.get("ignore_scancodes", DEFAULT_IGNORE_SCANCODES)))
+    hold_buttons = parse_hold_buttons(opts.get("hold_buttons", DEFAULT_HOLD_BUTTONS_CSV), cfg_level)
+    key_map_overrides = parse_key_map_overrides(opts.get("key_map_overrides", DEFAULT_KEY_MAP_OVERRIDES), cfg_level)
+    scan_map_overrides = parse_scan_map_overrides(opts.get("scan_map_overrides", DEFAULT_SCAN_MAP_OVERRIDES), cfg_level)
     hold_delay = parse_non_negative_float("hold_delay", opts.get("hold_delay", DEFAULT_HOLD_DELAY), DEFAULT_HOLD_DELAY, cfg_level)
     hold_repeat = parse_positive_float("hold_repeat", opts.get("hold_repeat", DEFAULT_HOLD_REPEAT), DEFAULT_HOLD_REPEAT, cfg_level)
     event_queue_size = parse_positive_int(
@@ -453,11 +582,18 @@ async def main() -> None:
         post_timeout=event_post_timeout,
     )
     await dispatcher.start()
+    key_map = dict(KEY_MAP)
+    key_map.update(key_map_overrides)
+    scan_map = dict(SCAN_MAP)
+    scan_map.update(scan_map_overrides)
 
     log("INFO", f"Target contains: '{target_contains}'", cfg_level)
     log("INFO", f"Output event_type: '{event_type}'", cfg_level)
     log("INFO", f"Grab device: {grab_device}", cfg_level)
     log("INFO", f"Ignore scancodes: {sorted(ignore_scans)}", cfg_level)
+    log("INFO", f"Hold buttons: {sorted(hold_buttons)}", cfg_level)
+    log("INFO", f"Key map entries: {len(key_map)} (overrides={len(key_map_overrides)})", cfg_level)
+    log("INFO", f"Scan map entries: {len(scan_map)} (overrides={len(scan_map_overrides)})", cfg_level)
     log("INFO", f"Hold: delay={hold_delay}s repeat={hold_repeat}s", cfg_level)
     log("INFO", f"Event queue size: {event_queue_size}", cfg_level)
     log("INFO", f"Event post timeout: {event_post_timeout}s", cfg_level)
@@ -490,7 +626,19 @@ async def main() -> None:
                 continue
 
             tasks = [
-                asyncio.create_task(read_device(d, dispatcher, ignore_scans, hold_delay, hold_repeat, cfg_level))
+                asyncio.create_task(
+                    read_device(
+                        d,
+                        dispatcher,
+                        key_map,
+                        scan_map,
+                        ignore_scans,
+                        hold_buttons,
+                        hold_delay,
+                        hold_repeat,
+                        cfg_level,
+                    )
+                )
                 for d in devs
             ]
 
