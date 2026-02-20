@@ -11,7 +11,7 @@ I created this repo in order to connect a Boxput Remoter ATV3 Lite Bluetooth rem
 
 Thought I'd share in case someone else was looking to do the same thing!
 
-Built with Codex using GPT-5.2 🤖
+Built with Codex.
 
 ## Prereqs
 
@@ -53,17 +53,30 @@ If modifying the repo locally, bump `version` in `config.yaml`, then use Add-on 
 All options live in the add-on config UI.
 
 - `target_contains` (string): Substring match for input device name.
-- `event_type` (string): Event name to fire in Home Assistant.
+- `event_type` (string): Event name to fire in Home Assistant (`[A-Za-z][A-Za-z0-9_]*`).
 - `grab_device` (bool): If true, grabs exclusive access to the evdev device.
-- `ignore_scancodes` (string): Comma-separated scan codes to ignore.
-- `hold_buttons` (string): Comma-separated buttons that should emit `key_hold`.
-- `key_map_overrides` (string): Button overrides for Linux key codes.
-- `scan_map_overrides` (string): Button overrides for scan codes.
+- `ignore_scancodes` (string): Comma-separated scan codes to ignore (hex, optional `0x` prefix).
+- `hold_buttons` (string): Comma-separated buttons that should emit `key_hold` (or a list value in JSON).
+- `key_map_overrides` (string): Button overrides for Linux key codes (JSON object, or CSV `key=value` / `key:value`).
+- `scan_map_overrides` (string): Button overrides for scan codes (JSON object, or CSV `key=value` / `key:value`).
 - `hold_delay` (float): Seconds to wait before emitting `key_hold` repeats.
 - `hold_repeat` (float): Seconds between `key_hold` repeats.
 - `event_queue_size` (int): Max queued events before new events are dropped.
 - `event_post_timeout` (float): Timeout in seconds for posting each event.
-- `log_level` (string): `DEBUG`, `INFO`, `WARN`, or `ERROR`.
+- `log_level` (string): `DEBUG`, `INFO`, `WARN`/`WARNING`, or `ERROR`.
+
+### Validation and fallback behavior
+
+The add-on validates option values at runtime. Invalid values are ignored and replaced with defaults, with a warning in logs.
+
+- `target_contains`: default `Remoter ATV3`
+- `event_type`: default `atv3_evdev_bridge_command_received`
+- `ignore_scancodes`: default `700aa`
+- `hold_buttons`: defaults to `up,down,left,right,vol_up,vol_down,ch_up,ch_down`
+- `hold_delay`: default `0.25` (must be `>= 0`)
+- `hold_repeat`: default `0.10` (must be `> 0`)
+- `event_queue_size`: default `256` (must be `> 0`)
+- `event_post_timeout`: default `3.0` (must be `> 0`)
 
 ### Device grabbing (exclusive access)
 
@@ -97,17 +110,24 @@ The add-on fires events to `event_type` with a payload like:
 ## Button mapping
 
 Mappings come from both Linux keycodes and scan codes. Known mappings live in
-`run.py` under `KEY_MAP` and `SCAN_MAP`. Unknown keys fall back to `KEY_*` names
-(lowercased) to avoid losing buttons.
+`run.py` under `KEY_MAP` and `SCAN_MAP`.
+
+Resolution order is:
+
+1. `KEY_MAP` (plus `key_map_overrides`)
+2. `SCAN_MAP` (plus `scan_map_overrides`)
+3. Derived key name fallback (e.g. `KEY_UP` -> `up`)
+
+Derived key names also include aliases like `select`/`enter` -> `ok`, `esc` -> `back`, and `search` -> `mic`.
 
 You can override mappings from the add-on config without editing code.
 
-- `key_map_overrides` supports either JSON object or comma-separated pairs:
+- `key_map_overrides` supports either JSON object or comma-separated pairs (`=` or `:`):
   - JSON: `{"353":"ok","172":"home"}`
-  - CSV: `353=ok,172=home`
-- `scan_map_overrides` supports either JSON object or comma-separated pairs:
+  - CSV: `353=ok,172=home` or `0x161:ok,172:home`
+- `scan_map_overrides` supports either JSON object or comma-separated pairs (`=` or `:`):
   - JSON: `{"c0009":"youtube","c000a":"gear"}`
-  - CSV: `c0009=youtube,c000a=gear`
+  - CSV: `c0009=youtube,c000a=gear` or `0xc0009:youtube,c000a:gear`
 
 `hold_buttons` controls which normalized buttons emit repeated `key_hold` events.
 Example: `up,down,left,right,vol_up,vol_down`
@@ -119,6 +139,8 @@ Known app scan codes from this remote:
 - `c0005`: `disney_plus`
 - `c0007`: `google_play`
 - `c000a`: `gear`
+- `c0221`: `mic`
+- `700aa`: `mic_extra`
 
 ## Security notes
 
@@ -130,6 +152,7 @@ the add-on is in Protection mode. For this add-on, you should:
 - Keep `apparmor: false` and `full_access: true` in `config.yaml`.
 - If the Protection toggle is missing in the UI, check `ha apps info local_atv3_evdev_bridge`:
   if `full_access` is `false`, Supervisor will hide that toggle.
+- The add-on logs current protection status at startup and warns if it is still enabled.
 
 ## Bluetooth setup (optional)
 
@@ -159,8 +182,9 @@ cat /proc/bus/input/devices | grep -i -n "remoter\\|atv3"
 - If no device is found, increase `log_level` to `DEBUG` and confirm the
   remote shows up in `/proc/bus/input/devices`.
 - If buttons are missing, capture scan codes and add them to `scan_map_overrides` (or `SCAN_MAP` in code).
-- If you see `PermissionError` / `Operation not permitted` for `/dev/input/event*`, disable Protection mode for this add-on and restart it.
+- If you see `PermissionError` / `Operation not permitted` for `/dev/input/event*`, disable Protection mode for this add-on and restart it. Permission warnings are throttled to once per 30 seconds per error signature.
 - If you see `Resource busy`, another integration is grabbing the device.
+- If an override mapping entry is malformed, it is skipped and a warning is logged.
 
 ## License
 
