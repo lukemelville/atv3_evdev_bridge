@@ -26,8 +26,11 @@ except ImportError:  # pragma: no cover - local unit tests do not require evdev.
             raise RuntimeError("python-evdev is required to read input devices")
 
     class _MissingEcodes:
+        EV_SYN = 0
         EV_MSC = 4
         EV_KEY = 1
+        SYN_REPORT = 0
+        SYN_DROPPED = 3
         MSC_SCAN = 4
         KEY_UNKNOWN = 240
         KEY = {
@@ -643,6 +646,19 @@ async def cancel_hold(task_info: HoldTask) -> None:
         pass
 
 
+async def clear_holds(
+    device_path: str, sender: EventSender, holds: Dict[Tuple[int, str], HoldTask]
+) -> None:
+    for (code, button), (stop_event, _) in holds.items():
+        stop_event.set()
+        sender.discard_pending_hold((device_path, code, button))
+    await asyncio.gather(
+        *(cancel_hold(task_info) for task_info in holds.values()),
+        return_exceptions=True,
+    )
+    holds.clear()
+
+
 def build_payload(
     device: InputDevice, code: int, name: str, scan: str, button: str
 ) -> dict:
@@ -668,10 +684,32 @@ async def read_device(
     last_scan: Optional[str] = None
     holds: Dict[Tuple[int, str], HoldTask] = {}
     active_presses: Dict[int, ActivePress] = {}
+    needs_resync = False
 
     log("INFO", f"Reading device: {device.path} name='{device.name}'", cfg_level)
     try:
         async for event in device.async_read_loop():
+            if event.type == ecodes.EV_SYN:
+                last_scan = None
+                if event.code == ecodes.SYN_DROPPED:
+                    needs_resync = True
+                    log("WARN", f"Input buffer overrun on {device.path}", cfg_level)
+                    await clear_holds(str(device.path), sender, holds)
+                elif event.code == ecodes.SYN_REPORT and needs_resync:
+                    # Keep release mappings for keys still down. A fresh press
+                    # is required to start repeating after input was lost.
+                    keys_down = set(device.active_keys())
+                    active_presses = {
+                        code: press
+                        for code, press in active_presses.items()
+                        if code in keys_down
+                    }
+                    needs_resync = False
+                continue
+
+            if needs_resync:
+                continue
+
             if event.type == ecodes.EV_MSC and event.code == ecodes.MSC_SCAN:
                 last_scan = norm_scan(event.value)
                 continue
@@ -749,14 +787,7 @@ async def read_device(
                 f"Cleaning up {len(holds)} hold task(s) for {device.path}",
                 cfg_level,
             )
-        await asyncio.gather(
-            *(cancel_hold(task_info) for task_info in holds.values()),
-            return_exceptions=True,
-        )
-        for code, button in holds:
-            sender.discard_pending_hold((str(device.path), code, button))
-        holds.clear()
-        active_presses.clear()
+        await clear_holds(str(device.path), sender, holds)
 
 
 def close_device(device: InputDevice) -> None:

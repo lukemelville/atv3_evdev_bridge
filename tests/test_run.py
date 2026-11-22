@@ -262,6 +262,88 @@ async def _kernel_repeat_clears_scan_state():
     assert [item["button"] for item in sender.payloads] == ["key_240", "key_240"]
 
 
+def test_input_overrun_clears_holds_and_skips_damaged_frame(monkeypatch):
+    async def scenario():
+        sender = run.EventSender(FakeSession(), "token", "event_name", "ERROR")
+        hold_started = asyncio.Event()
+        hold_stopped = asyncio.Event()
+
+        async def hold_loop(sender, payload, stop_event, delay, repeat):
+            sender.emit({**payload, "type": "key_hold"})
+            hold_started.set()
+            try:
+                await stop_event.wait()
+            finally:
+                hold_stopped.set()
+
+        monkeypatch.setattr(run, "hold_loop", hold_loop)
+
+        class OverrunDevice(FiniteDevice):
+            def active_keys(self):
+                return []
+
+            async def async_read_loop(self):
+                yield input_event(run.ecodes.EV_KEY, 115, 1)
+                await asyncio.wait_for(hold_started.wait(), 1)
+                assert sender.pending_count == 2
+
+                yield input_event(run.ecodes.EV_SYN, run.ecodes.SYN_DROPPED, 0)
+                assert hold_stopped.is_set()
+                assert sender.pending_count == 1
+
+                yield input_event(run.ecodes.EV_KEY, 116, 1)
+                yield input_event(run.ecodes.EV_MSC, run.ecodes.MSC_SCAN, 0xC0009)
+                yield input_event(run.ecodes.EV_SYN, run.ecodes.SYN_REPORT, 0)
+                yield input_event(run.ecodes.EV_KEY, 240, 1)
+                yield input_event(run.ecodes.EV_KEY, 240, 0)
+
+                hold_started.clear()
+                yield input_event(run.ecodes.EV_KEY, 115, 1)
+                await asyncio.wait_for(hold_started.wait(), 1)
+                yield input_event(run.ecodes.EV_KEY, 115, 0)
+
+        await run.read_device(OverrunDevice([]), sender, set(), 0.25, 0.1, "ERROR")
+
+        assert [
+            (item.payload["type"], item.payload["button"]) for item in sender._queue
+        ] == [
+            ("key_down", "vol_up"),
+            ("key_down", "key_240"),
+            ("key_up", "key_240"),
+            ("key_down", "vol_up"),
+            ("key_up", "vol_up"),
+        ]
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("keys_down", "released_button"), [([240], "youtube"), ([], "key_240")]
+)
+def test_input_overrun_resyncs_release_mapping(keys_down, released_button):
+    class OverrunDevice(FiniteDevice):
+        def active_keys(self):
+            return keys_down
+
+    sender = CaptureSender()
+    device = OverrunDevice(
+        [
+            input_event(run.ecodes.EV_MSC, run.ecodes.MSC_SCAN, 0xC0009),
+            input_event(run.ecodes.EV_KEY, 240, 1),
+            input_event(run.ecodes.EV_SYN, run.ecodes.SYN_DROPPED, 0),
+            input_event(run.ecodes.EV_SYN, run.ecodes.SYN_REPORT, 0),
+            input_event(run.ecodes.EV_KEY, 240, 0),
+        ]
+    )
+
+    asyncio.run(run.read_device(device, sender, set(), 0.25, 0.1, "ERROR"))
+
+    assert [(item["type"], item["button"]) for item in sender.payloads] == [
+        ("key_down", "youtube"),
+        ("key_up", released_button),
+    ]
+
+
 def test_read_device_cleans_up_hold_task_on_cancellation():
     asyncio.run(_read_device_cleans_up_hold_task_on_cancellation())
 
