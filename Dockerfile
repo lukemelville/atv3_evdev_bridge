@@ -1,5 +1,12 @@
-ARG BUILD_FROM
-FROM ${BUILD_FROM}
+FROM ghcr.io/home-assistant/base:3.24-2026.06.1
+
+ARG BUILD_VERSION
+ARG BUILD_ARCH
+
+LABEL \
+    io.hass.version="${BUILD_VERSION}" \
+    io.hass.type="app" \
+    io.hass.arch="${BUILD_ARCH}"
 
 # Avoid pip/PEP668 hassles: use Alpine packages
 RUN apk add --no-cache \
